@@ -45,8 +45,9 @@ uint32_t timer = millis();
 // User interface input globals
 #define LONGPRESS_LEN    500  // millis that make up a long press (1s)
 #define DEBOUNCE 10
-enum { EV_NONE=0, EV_SHORTPRESS, EV_LONGPRESS};
+enum { EV_NONE=0, EV_SHORTPRESS, EV_LONGPRESS, EV_LONGHOLD};
 boolean button_was_pressed = false; // previous state
+boolean button_longhold   = true;
 uint32_t button_pressed_timer = millis(); // press running duration
 
 enum { DM_LATLONG=0, DM_MOTION, DM_WAYPOINT, DM_NAVI, DM_MAX};
@@ -321,15 +322,25 @@ int raiseButtonEvent() {
   if(debounceVal == button_now_pressed) {
     // The button just got released. Now we need to decide if it was short 
     // or long press and generate the right event.
-    if (!button_now_pressed && button_was_pressed) {
+
+    if(button_now_pressed && button_was_pressed) {
+     if(button_longhold && ((millis() - button_pressed_timer) > LONGPRESS_LEN))  {
+       event = EV_LONGHOLD;
+       button_longhold = false;
+      }
+    }
+
+    if(!button_now_pressed && button_was_pressed) {
       if (millis() - button_pressed_timer < LONGPRESS_LEN)
         event = EV_SHORTPRESS;
       else
         event = EV_LONGPRESS;
     }
 
-    if (button_now_pressed && !button_was_pressed)
+    if(button_now_pressed && !button_was_pressed) {
+      button_longhold = true; // arm the longhold event
       button_pressed_timer = millis();
+    }
     
     button_was_pressed = button_now_pressed;
   }
@@ -349,6 +360,8 @@ void handleButton() {
       displayMode = (displayMode + 1) % DM_MAX;
     break;
     case EV_LONGPRESS:
+    break;
+    case EV_LONGHOLD:
       if(displayMode==DM_LATLONG) {
         // in LAT/LONG mode a capture way point
         WP_Capture = true;
