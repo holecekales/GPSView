@@ -48,11 +48,14 @@ uint32_t timer = millis();
 enum { EV_NONE=0, EV_SHORTPRESS, EV_LONGPRESS, EV_LONGHOLD};
 boolean button_was_pressed = false; // previous state
 boolean button_longhold   = true;
-uint32_t button_pressed_timer = millis(); // press running duration
+uint32_t button_pressed_timer = 0; // press running duration
 
 enum { DM_LATLONG=0, DM_MOTION, DM_WAYPOINT, DM_NAVI, DM_MAX};
+char* tabName[] = {"Lat/Long", "Motion", "Waypoint", "Navigate" };
+
 uint8_t displayMode      = 0;
 uint8_t prevDisplayMode  = -1;
+boolean prevGPSFIX = false;
 
 // formating print buffer
 char printBuffer[15];
@@ -159,7 +162,7 @@ void displayKeyValueInt(const char* name, int value, uint8_t row = -1, uint8_t c
 }
 
 //------------------------------------------------------------------------------
-void displayContext(const char* screenName) {
+void displayContext(const char* screenName, boolean displayTime) {
   oled.set1X();
   displayKeyValueInt("Sat:", GPS.satellites, 0, 0);
   if(WP_OK>0) {
@@ -181,22 +184,13 @@ void displayContext(const char* screenName) {
     oled.print(screenName);
   }
 
-  if(displayMode != DM_MOTION && displayMode != DM_NAVI)
+  if(displayTime)
     displayTimefromGPS(3,7);  
 }
 
-//------------------------------------------------------------------------------
-void displayLongLat(float lat, float lon) {
-    if(GPS.fix) {
-      oled.setCursor(0, 2);
-      oled.set2X();
-      oled.println(dtostrf(lat, 10,5,printBuffer));
-      oled.println(dtostrf(lon, 10,5,printBuffer));   
-    }
-}
 
 //------------------------------------------------------------------------------
-void printBigLine(uint8_t row, uint8_t off, const char* name, const char* value, const char* unit){
+void printBigLine(uint8_t row, uint8_t off, const char* name, const char* value, const char* unit) {
   oled.setCursor(0, row);
   oled.set2X();
   oled.print(name); 
@@ -206,20 +200,25 @@ void printBigLine(uint8_t row, uint8_t off, const char* name, const char* value,
   oled.print(unit);
 }
 
+
+//------------------------------------------------------------------------------
+void displayLongLat(float lat, float lon) {
+    printBigLine(2, 0, "", dtostrf(lat, 10,5,printBuffer), "o");
+    printBigLine(4, 0, "", dtostrf(lon, 10,5,printBuffer), "o");
+}
+
 //------------------------------------------------------------------------------
 void displayMotion() {
-  if(GPS.fix) {
-    char* u = "";
-    float v = 0;
-    switch(spdConverstion) {
-      case U_KN:   v = GPS.speed;                   u = "kn  ";   break;
-      case U_MPS:  v = GPS.speed * MPS_PER_KNOT;    u = "m/s ";  break;
-      case U_KMPH: v = GPS.speed * KMPH_PER_KNOT;   u = "km/h"; break;
-    }
-    printBigLine(2, 7, "Spd", dtostrf(v,5,1,printBuffer), u);
-    printBigLine(4, 7, "Ang", dtostrf(GPS.angle,5,1,printBuffer), "o");
-    printBigLine(6, 7, "Alt", dtostrf(GPS.altitude,5,1,printBuffer), "m");
+  char* u = "";
+  float v = 0;
+  switch(spdConverstion) {
+    case U_KN:   v = GPS.speed;                   u = "kn  ";   break;
+    case U_MPS:  v = GPS.speed * MPS_PER_KNOT;    u = "m/s ";  break;
+    case U_KMPH: v = GPS.speed * KMPH_PER_KNOT;   u = "km/h"; break;
   }
+  printBigLine(2, 7, "Spd", dtostrf(v,5,1,printBuffer), u);
+  printBigLine(4, 7, "Ang", dtostrf(GPS.angle,5,1,printBuffer), "o");
+  printBigLine(6, 7, "Alt", dtostrf(GPS.altitude,5,1,printBuffer), "m");
 }
 
 //------------------------------------------------------------------------------
@@ -230,21 +229,17 @@ void displayNavigation() {
     oled.print("Waypoint?"); 
     return;
   }
-
-  const uint8_t o = 7;
-
-  if(GPS.fix) {
-      float dist = distance_between(GPS.latitudeDegrees, GPS.longitudeDegrees, WP_LAT, WP_LON);
-      char* u = "m";
-      if(dist >= 1000) {
-        u = "km";
-        dist /= 1000.f;
-      }
-      float crs = course_to(GPS.latitudeDegrees, GPS.longitudeDegrees, WP_LAT, WP_LON);
-      printBigLine(2, 17, "Dst", dtostrf(dist,5,1,printBuffer), u);
-      printBigLine(4, 17, "Crs", dtostrf(crs,5,1,printBuffer), "o");
-      printBigLine(6, 17, "Dir", cardinal(crs), " ");
+  
+  float dist = distance_between(GPS.latitudeDegrees, GPS.longitudeDegrees, WP_LAT, WP_LON);
+  char* u = "m";
+  if(dist >= 1000) {
+    u = "km";
+    dist /= 1000.f;
   }
+  float crs = course_to(GPS.latitudeDegrees, GPS.longitudeDegrees, WP_LAT, WP_LON);
+  printBigLine(2, 17, "Dst", dtostrf(dist,5,1,printBuffer), u);
+  printBigLine(4, 17, "Crs", dtostrf(crs,5,1,printBuffer), "o");
+  printBigLine(6, 17, "Dir", cardinal(crs), " ");
 }
 
 //------------------------------------------------------------------------------
@@ -252,44 +247,45 @@ void updateDisplay() {
   // if millis() or timer wraps around, we'll just reset it
   if (timer > millis())  timer = millis();
 
-  boolean redraw = prevDisplayMode != displayMode; 
-
-  if(redraw) {
+  // redraw if page changed  or if we just aquiring fix to having fix
+  boolean cls = (prevDisplayMode != displayMode) || (prevGPSFIX != GPS.fix); // clear screen
+  prevGPSFIX = GPS.fix;
+  if(cls) {
     oled.clear();
     prevDisplayMode = displayMode;
   }
 
-  switch(displayMode) {
-    case DM_LATLONG:
-      // approximately every 2 seconds or so, print out the current stats
-      if (redraw || (millis() - timer > 500)) { 
-        timer = millis(); // reset the timer
-        displayContext("Lat/Long");     
-        displayLongLat(GPS.latitudeDegrees, GPS.longitudeDegrees);  
-      }
-    break;
-    case DM_MOTION:
-        if (redraw || (millis() - timer > 500)) { 
-          timer = millis(); // reset the timer  
-          displayContext("Motion");
+  if(cls || ((millis() - timer) > 500)) {
+    timer = millis(); // reset the timer
+
+    if(!GPS.fix) {
+      displayContext(tabName[displayMode], true);
+      // if we don't have a fix, we will just display that we're looking for 
+      // satellites. Time should be always good on the GPS (as long as the battery is fine)
+      printBigLine(2, 10, "", "ACQUIRING", "");
+      printBigLine(4, 4, "", "SATELLITES",  "");
+    } 
+    else {
+      switch(displayMode) {
+        case DM_LATLONG:
+          displayContext(tabName[displayMode], true);
+          displayLongLat(GPS.latitudeDegrees, GPS.longitudeDegrees);  
+        break;
+        case DM_MOTION:
+          displayContext(tabName[displayMode], false);
           displayMotion();      
-        }
-    break;
-    case DM_WAYPOINT:
-        if (redraw || (millis() - timer > 500)) { 
-          timer = millis(); // reset the timer  
-          displayContext("Waypoint");
+        break;
+        case DM_WAYPOINT:
+          displayContext(tabName[displayMode], true);
           if(WP_OK > 0)
             displayLongLat(WP_LAT, WP_LON);
-        }
-    break;
-    case DM_NAVI:
-        if (redraw || (millis() - timer > 500)) { 
-          timer = millis(); // reset the timer  
-          displayContext("Navigate");
-          displayNavigation();
-        }
-    break;
+        break;
+        case DM_NAVI:
+            displayContext(tabName[displayMode], false);
+            displayNavigation();
+        break;
+      }
+    }
   }
 }
 
