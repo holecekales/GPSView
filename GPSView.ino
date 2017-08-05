@@ -238,8 +238,6 @@ void displayNavigation() {
       oled.println(cardinal(crs));
       // maybe add a difference in altitude
   }
-    
-
 }
 
 //------------------------------------------------------------------------------
