@@ -1,0 +1,322 @@
+
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GPS.h>
+
+
+// If using software SPI (the default case):
+#define OLED_DATA   9
+#define OLED_CLK   10
+#define OLED_DC    11
+#define OLED_CS    12
+#define OLED_RESET 13
+
+
+#include "SSD1306Ascii.h"
+#include "SSD1306AsciiSoftSpi.h"
+
+SSD1306AsciiSoftSpi oled;
+//------------------------------------------------------------------------------
+void setup() {         
+  oled.begin(&Adafruit128x64, OLED_CS, OLED_DC, OLED_CLK, OLED_DATA);
+  oled.setFont(Adafruit5x7);
+    
+  uint32_t m = micros();
+  oled.clear();  
+  oled.println("Hello world!");
+  oled.println("A long line may be truncated");
+  oled.println();
+  oled.set2X();
+  oled.println("2X demo");
+  oled.set1X();
+  oled.print("\nmicros: ");
+  oled.print(micros() - m);
+}
+//------------------------------------------------------------------------------
+void loop() {}
+
+#if 0 
+ int rxPin = 0;                    // RX PIN 
+ int txPin = 1;                    // TX TX
+ int byteGPS=-1;
+ char linea[300] = "";
+ char comandoGPR[7] = "$GPRMC";
+ int cont=0;
+ int bien=0;
+ int conta=0;
+ int indices[13];
+ void setup() {
+   pinMode(ledPin, OUTPUT);       // Initialize LED pin
+   pinMode(rxPin, INPUT);
+   pinMode(txPin, OUTPUT);
+   Serial.begin(115200);
+   for (int i=0;i<300;i++){       // Initialize a buffer for received data
+     linea[i]=' ';
+   }   
+ }
+ void loop() {
+  
+   byteGPS=Serial.read();         // Read a byte of the serial port
+   if (byteGPS == -1) {           // See if the port is empty yet
+     delay(100); 
+   } else {
+     // note: there is a potential buffer overflow here!
+     linea[conta]=byteGPS;        // If there is serial port data, it is put in the buffer
+     conta++;                      
+     Serial.print(byteGPS); 
+     if (byteGPS==13){            // If the received byte is = to 13, end of transmission
+       // note: the actual end of transmission is <CR><LF> (i.e. 0x13 0x10)
+       cont=0;
+       bien=0;
+       // The following for loop starts at 1, because this code is clowny and the first byte is the <LF> (0x10) from the previous transmission.
+       for (int i=1;i<7;i++){     // Verifies if the received command starts with $GPR
+         if (linea[i]==comandoGPR[i-1]){
+           bien++;
+         }
+       }
+       if(bien==6){               // If yes, continue and process the data
+         for (int i=0;i<300;i++){
+           if (linea[i]==','){    // check for the position of the  "," separator
+             // note: again, there is a potential buffer overflow here!
+             indices[cont]=i;
+             cont++;
+           }
+           if (linea[i]=='*'){    // ... and the "*"
+             indices[12]=i;
+             cont++;
+           }
+         }
+         Serial.println("");      // ... and write to the serial port
+         Serial.println("");
+         Serial.println("---------------");
+         for (int i=0;i<12;i++){
+           switch(i){
+             case 0 :Serial.print("Time in UTC (HhMmSs): ");break;
+             case 1 :Serial.print("Status (A=OK,V=KO): ");break;
+             case 2 :Serial.print("Latitude: ");break;
+             case 3 :Serial.print("Direction (N/S): ");break;
+             case 4 :Serial.print("Longitude: ");break;
+             case 5 :Serial.print("Direction (E/W): ");break;
+             case 6 :Serial.print("Velocity in knots: ");break;
+             case 7 :Serial.print("Heading in degrees: ");break;
+             case 8 :Serial.print("Date UTC (DdMmAa): ");break;
+             case 9 :Serial.print("Magnetic degrees: ");break;
+             case 10 :Serial.print("(E/W): ");break;
+             case 11 :Serial.print("Mode: ");break;
+             case 12 :Serial.print("Checksum: ");break;
+           }
+           for (int j=indices[i];j<(indices[i+1]-1);j++){
+             Serial.print(linea[j+1]); 
+           }
+           Serial.println("");
+         }
+         Serial.println("---------------");
+       }
+       conta=0;                    // Reset the buffer
+       for (int i=0;i<300;i++){    //  
+         linea[i]=' ';             
+       }                 
+     }
+   }
+ }
+
+#endif
+
+#if 0
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#include <Adafruit_GPS.h>
+#include <SoftwareSerial.h>
+
+
+// If using software SPI (the default case):
+#define OLED_MOSI   9
+#define OLED_CLK   10
+#define OLED_DC    11
+#define OLED_CS    12
+#define OLED_RESET 13
+Adafruit_SSD1306 display(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
+
+/* Uncomment this block to use hardware SPI
+#define OLED_DC     6
+#define OLED_CS     7
+#define OLED_RESET  8
+Adafruit_SSD1306 display(OLED_DC, OLED_RESET, OLED_CS);
+*/
+
+SoftwareSerial mySerial(3, 2);
+Adafruit_GPS GPS(&mySerial);
+
+// this keeps track of whether we're using the interrupt
+// off by default!
+boolean usingInterrupt = true;
+void useInterrupt(boolean); // Func prototype keeps Arduino 0023 happy
+
+void setup()  
+{   
+  // connect at 115200 so we can read the GPS fast enough and echo without dropping chars
+  // also spit it out
+  Serial.begin(115200);
+  
+  // 9600 NMEA is the default baud rate for Adafruit MTK GPS's- some use 4800
+  GPS.begin(9600);
+  
+  // uncomment this line to turn on RMC (recommended minimum) and GGA (fix data) including altitude
+  GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
+  // uncomment this line to turn on only the "minimum recommended" data
+  //GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCONLY);
+  // For parsing data, we don't suggest using anything but either RMC only or RMC+GGA since
+  // the parser doesn't care about other sentences at this time
+  
+  // Set the update rate
+  GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);   // 1 Hz update rate
+  // For the parsing code to work nicely and have time to sort thru the data, and
+  // print it out we don't suggest using anything higher than 1 Hz
+
+  // Request updates on antenna status, comment out to keep quiet
+  GPS.sendCommand(PGCMD_ANTENNA);
+
+  // the nice thing about this code is you can have a timer0 interrupt go off
+  // every 1 millisecond, and read data from the GPS for you. that makes the
+  // loop code a heck of a lot easier!
+  useInterrupt(true);
+
+  delay(1000);
+  // Ask for firmware version
+  mySerial.println(PMTK_Q_RELEASE);
+}
+
+
+// Interrupt is called once a millisecond, looks for any new GPS data, and stores it
+SIGNAL(TIMER0_COMPA_vect) {
+  char c = GPS.read();
+  // if you want to debug, this is a good time to do it!
+}
+
+void useInterrupt(boolean v) {
+  if (v) {
+    // Timer0 is already used for millis() - we'll just interrupt somewhere
+    // in the middle and call the "Compare A" function above
+    OCR0A = 0xAF;
+    TIMSK0 |= _BV(OCIE0A);
+    usingInterrupt = true;
+  } else {
+    // do not call the interrupt function COMPA anymore
+    TIMSK0 &= ~_BV(OCIE0A);
+    usingInterrupt = false;
+  }
+}
+
+uint32_t timer = millis();
+void loop()                     // run over and over again
+{
+  // if a sentence is received, we can check the checksum, parse it...
+  if (GPS.newNMEAreceived()) {
+    if (!GPS.parse(GPS.lastNMEA()))   // this also sets the newNMEAreceived() flag to false
+      return;  // we can fail to parse a sentence in which case we should just wait for another
+    
+ #if 0   
+    Serial.print("\nTime: ");
+    Serial.print(GPS.hour, DEC); Serial.print(':');
+    Serial.print(GPS.minute, DEC); Serial.print(':');
+    Serial.print(GPS.seconds, DEC); Serial.print('.');
+    Serial.println(GPS.milliseconds);
+    Serial.print("Date: ");
+    Serial.print(GPS.day, DEC); Serial.print('/');
+    Serial.print(GPS.month, DEC); Serial.print("/20");
+    Serial.println(GPS.year, DEC);
+    Serial.print("Fix: "); Serial.print((int)GPS.fix);
+    Serial.print(" quality: "); Serial.println((int)GPS.fixquality); 
+    if (GPS.fix) {
+      Serial.print("Location: ");
+      Serial.print(GPS.latitude, 4); Serial.print(GPS.lat);
+      Serial.print(", "); 
+      Serial.print(GPS.longitude, 4); Serial.println(GPS.lon);
+      Serial.print("Location (in degrees, works with Google Maps): ");
+      Serial.print(GPS.latitudeDegrees, 4);
+      Serial.print(", "); 
+      Serial.println(GPS.longitudeDegrees, 4);
+      
+      Serial.print("Speed (knots): "); Serial.println(GPS.speed);
+      Serial.print("Angle: "); Serial.println(GPS.angle);
+      Serial.print("Altitude: "); Serial.println(GPS.altitude);
+      Serial.print("Satellites: "); Serial.println((int)GPS.satellites);
+ #endif     
+  }
+}
+
+#endif
+
+#if 0
+
+
+void setup()   { 
+  return;               
+  Serial.begin(9600);
+
+  // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
+  display.begin(SSD1306_SWITCHCAPVCC);
+  // init done
+  
+  // Show image buffer on the display hardware.
+  // Since the buffer is intialized with an Adafruit splashscreen
+  // internally, this will display the splashscreen.
+  // display.display();
+  // delay(500);
+  // Clear the buffer.
+  display.clearDisplay();
+
+  showSomeText();
+
+}
+
+
+void loop() {
+  
+}
+
+
+
+void showSomeText() {
+  // draw the first ~12 characters in the font
+  testdrawchar();
+  display.display();
+  delay(2000);
+  display.clearDisplay();
+
+  // text display tests
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0,0);
+  display.println("Hello, world!");
+  display.setTextColor(BLACK, WHITE); // 'inverted' text
+  display.println(3.141592);
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.print("0x"); display.println(0xDEADBEEF, HEX);
+  display.display();
+  delay(2000);
+  display.clearDisplay();
+
+}
+
+
+
+void testdrawchar(void) {
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0,0);
+
+  for (uint8_t i=0; i < 168; i++) {
+    if (i == '\n') continue;
+    display.write(i);
+    if ((i > 0) && (i % 21 == 0))
+      display.println();
+  }    
+  display.display();
+}
+
+#endif
