@@ -49,12 +49,18 @@ enum { EV_NONE=0, EV_SHORTPRESS, EV_LONGPRESS};
 boolean button_was_pressed = false; // previous state
 uint32_t button_pressed_timer = millis(); // press running duration
 
-enum { DM_LONGLAT=0, DM_MOTION, DM_MAX};
+enum { DM_LATLONG=0, DM_MOTION, DM_WAYPOINT, DM_NAVI, DM_MAX};
 uint8_t displayMode      = 0;
 uint8_t prevDisplayMode  = -1;
 
 // formating print buffer
 char printBuffer[15];
+
+// Navigation data
+float WP_LAT = 0;
+float WP_LON = 0;
+uint8_t WP_OK = 0;
+boolean WP_Capture = false;
 
 //------------------------------------------------------------------------------
 void setup() {
@@ -108,8 +114,6 @@ SIGNAL(TIMER0_COMPA_vect) {
     if (c) UDR0 = c;  
     // writing direct to UDR0 is much much faster than Serial.print 
     // but only one character can be written at a time. 
-#else
-  Serial.print(c);
 #endif
 }
 
@@ -149,7 +153,12 @@ void displayKeyValueInt(const char* name, int value, uint8_t row = -1, uint8_t c
 void displayContext(const char* screen) {
   oled.set1X();
   displayKeyValueInt("Sat:", GPS.satellites, 0, 0);
-  displayKeyValueInt(" Fix:", GPS.fixquality,0, 86);
+  if(WP_OK>0) {
+    displayKeyValueInt("Fix:", /*GPS.fixquality*/ WP_OK ,0, 92);
+  } else {
+    oled.setCol(92);
+    oled.print("Fix:NO");
+  }
   
   if(screen) {
     // pixel (column) 40 is a good begining
@@ -163,18 +172,17 @@ void displayContext(const char* screen) {
     oled.print(screen);
   }
 
-  if(displayMode == DM_LONGLAT)
+  if(displayMode != DM_MOTION)
     displayTimefromGPS(3,7);  
 }
 
 //------------------------------------------------------------------------------
-void displayLongLat() {
+void displayLongLat(float lat, float lon) {
     if(GPS.fix) {
       oled.setCursor(0, 2);
       oled.set2X();
-     
-      oled.println(dtostrf(GPS.latitudeDegrees, 10,5,printBuffer));
-      oled.println(dtostrf(GPS.longitudeDegrees, 10,5,printBuffer));   
+      oled.println(dtostrf(lat, 10,5,printBuffer));
+      oled.println(dtostrf(lon, 10,5,printBuffer));   
     }
 }
 
@@ -202,12 +210,12 @@ void updateDisplay() {
   }
 
   switch(displayMode) {
-    case DM_LONGLAT:
+    case DM_LATLONG:
       // approximately every 2 seconds or so, print out the current stats
       if (redraw || (millis() - timer > 500)) { 
         timer = millis(); // reset the timer
         displayContext("Lat/Long");     
-        displayLongLat();  
+        displayLongLat(GPS.latitudeDegrees, GPS.longitudeDegrees);  
       }
     break;
     case DM_MOTION:
@@ -216,7 +224,17 @@ void updateDisplay() {
           displayContext("Motion");
           displayMotion();      
         }
-    break; 
+    break;
+    case DM_WAYPOINT:
+        if (redraw || (millis() - timer > 500)) { 
+          timer = millis(); // reset the timer  
+          displayContext("Waypoint");
+          if(WP_OK > 0)
+            displayLongLat(WP_LAT, WP_LON);
+        }
+    break;
+    case DM_NAVI:
+    break;
   }
 }
 
@@ -283,7 +301,24 @@ void handleButton() {
       displayMode = (displayMode + 1) % DM_MAX;
     break;
     case EV_LONGPRESS:
-      Serial.println("L");
+      if(displayMode==DM_LATLONG) {
+        // in LAT/LONG mode a capture way point
+        WP_Capture = true;
+      } else if(displayMode==DM_WAYPOINT) {
+        // remove waypoint - no need, just for fun :)
+        WP_OK  = 0;
+        WP_LAT = 0;
+        WP_LON = 0;
+        prevDisplayMode = -1;
+      }
     break;
+  }
+
+  // capture new waypoint waypoint
+  if(GPS.fix && WP_Capture) {
+    WP_Capture = false;
+    WP_OK += 1;
+    WP_LAT = GPS.latitudeDegrees;
+    WP_LON = GPS.longitudeDegrees;
   }
 }
