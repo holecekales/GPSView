@@ -235,7 +235,6 @@ void displayNavigation() {
       oled.setCursor(0, 6);
       oled.print("Dir: ");
       oled.setCol(oled.col() + o);
-      oled.clearToEOL();
       oled.println(cardinal(crs));
       // maybe add a difference in altitude
   }
@@ -426,7 +425,7 @@ float course_to (float lat1, float long1, float lat2, float long2)
 //------------------------------------------------------------------------------
 const char* cardinal (float course)
 {
-  static const char* directions[] = {"N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"};
+  static const char* directions[] = {"N  ", "NNE", "NE ", "ENE", "E  ", "ESE", "SE ", "SSE", "S  ", "SSW", "SW ", "WSW", "W  ", "WNW", "NW ", "NNW"};
 
   int direction = (int)((course + 11.25f) / 22.5f);
   return directions[direction % 16];
