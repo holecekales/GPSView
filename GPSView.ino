@@ -42,12 +42,16 @@ Adafruit_GPS GPS(&ss);
 boolean usingInterrupt = false;
 uint32_t timer = millis();
 
+// User interface input globals
 #define LONGPRESS_LEN    500  // millis that make up a long press (1s)
 #define DEBOUNCE 10
 enum { EV_NONE=0, EV_SHORTPRESS, EV_LONGPRESS};
-
 boolean button_was_pressed = false; // previous state
 uint32_t button_pressed_timer = millis(); // press running duration
+
+enum { DM_LONGLAT=0, DM_SOMETHING, DM_MAX};
+uint8_t displayMode      = 0;
+uint8_t prevDisplayMode  = -1;
 
 
 //------------------------------------------------------------------------------
@@ -77,20 +81,18 @@ void setup() {
  
   // set up display                
   oled.begin(&Adafruit128x64, OLED_CS, OLED_DC, OLED_CLK, OLED_DATA, OLED_RESET);
-  oled.setFont(Stang5x7);
-  // oled.set2X();
+  oled.setFont(System5x7);
   oled.clear();
 
   pinMode(BUTTON_PIN, INPUT);
   digitalWrite(BUTTON_PIN, HIGH); // pull-up
-
-  // oled.print("Hello world!");
 }
 //------------------------------------------------------------------------------
 
 void loop() {
    handleGPS();
-   handleButton();
+   handleButton();  // stalls for 10ms :(
+   updateDisplay();
 }
 
 //------------------------------------------------------------------------------
@@ -143,12 +145,27 @@ void displayKeyValueInt(const char* name, int value, uint8_t row = -1, uint8_t c
 }
 
 //------------------------------------------------------------------------------
+void displayContext(const char* screen) {
+  oled.set1X();
+  displayKeyValueInt("Sat:", GPS.satellites, 0, 0);
+  displayKeyValueInt(" Fix:", GPS.fixquality,0, 86);
+  
+  if(screen) {
+    // pixel (column) 40 is a good begining
+    // i can accomomdate at most 8 cahracters
+    // calculate offset from position 40 toward the center of the screen
+    // based on the length of the string
+    // each char is 6 wide (right now), but i need to split it between 
+    // begining and end so i will multiple by 6/2 == 3
+    uint8_t off = (8-strlen(screen)) * 3; 
+    oled.setCol(40+off);
+    oled.print(screen);
+  }
+  displayTimefromGPS(3,7);  
+}
+
+//------------------------------------------------------------------------------
 void displayLongLat() {
-    oled.set1X();
-    displayKeyValueInt("Sat:", GPS.satellites, 0, 0);
-    displayKeyValueInt(" Fix:", GPS.fixquality,0, 86);
-    
-    displayTimefromGPS(3,7);
     if (GPS.fix) {
 
       oled.setCursor(0, 2);
@@ -168,11 +185,41 @@ void displayLongLat() {
 
 
 //------------------------------------------------------------------------------
+void updateDisplay() {
+  // if millis() or timer wraps around, we'll just reset it
+  if (timer > millis())  timer = millis();
+
+  boolean redraw = prevDisplayMode != displayMode; 
+
+  if(redraw) {
+    oled.clear();
+    prevDisplayMode = displayMode;
+  }
+
+  switch(displayMode) {
+    case DM_LONGLAT:
+      // approximately every 2 seconds or so, print out the current stats
+      if (redraw || (millis() - timer > 500)) { 
+        timer = millis(); // reset the timer
+        displayContext("Lat/Long");     
+        displayLongLat();  
+      }
+    break;
+    case DM_SOMETHING:
+        if (redraw || (millis() - timer > 500)) { 
+          timer = millis(); // reset the timer  
+          displayContext("Motion");      
+        }
+    break; 
+  }
+}
+
+//------------------------------------------------------------------------------
 void handleGPS() {
 
  // in case you are not using the interrupt above, you'll
   // need to 'hand query' the GPS, not suggested :(
-  if (! usingInterrupt) {
+  if (!usingInterrupt) {
     // read data from the GPS in the 'main loop'
     char c = GPS.read();
     // if you want to debug, this is a good time to do it!
@@ -189,16 +236,7 @@ void handleGPS() {
   
     if (!GPS.parse(GPS.lastNMEA()))   // this also sets the newNMEAreceived() flag to false
       return;  // we can fail to parse a sentence in which case we should just wait for another
-  }
-
-  // if millis() or timer wraps around, we'll just reset it
-  if (timer > millis())  timer = millis();
-
-  // approximately every 2 seconds or so, print out the current stats
-  if (millis() - timer > 500) { 
-    timer = millis(); // reset the timer
-    displayLongLat();  
-  }
+  } 
 }
 
 //------------------------------------------------------------------------------
@@ -236,7 +274,7 @@ void handleButton() {
     case EV_NONE:
     break;
     case EV_SHORTPRESS:
-      Serial.println("S");
+      displayMode = (displayMode + 1) % DM_MAX;
     break;
     case EV_LONGPRESS:
       Serial.println("L");
