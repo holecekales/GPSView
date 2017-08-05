@@ -49,10 +49,12 @@ enum { EV_NONE=0, EV_SHORTPRESS, EV_LONGPRESS};
 boolean button_was_pressed = false; // previous state
 uint32_t button_pressed_timer = millis(); // press running duration
 
-enum { DM_LONGLAT=0, DM_SOMETHING, DM_MAX};
+enum { DM_LONGLAT=0, DM_MOTION, DM_MAX};
 uint8_t displayMode      = 0;
 uint8_t prevDisplayMode  = -1;
 
+// formating print buffer
+char printBuffer[15];
 
 //------------------------------------------------------------------------------
 void setup() {
@@ -128,10 +130,9 @@ void useInterrupt(boolean v) {
 
 //------------------------------------------------------------------------------
 void displayTimefromGPS(uint8_t col, uint8_t row) {
-  char c[15];
-  sprintf(c,"%02d:%02d %02d\/%02d\/%02d", GPS.hour,GPS.minute,GPS.month,GPS.day,GPS.year);// build integer string using C integer formatters  
+  sprintf(printBuffer,"%02d:%02d %02d\/%02d\/%02d", GPS.hour,GPS.minute,GPS.month,GPS.day,GPS.year);// build integer string using C integer formatters  
   oled.setCursor(col, row);
-  oled.print("Time: "); oled.print(c);
+  oled.print("Time: "); oled.print(printBuffer);
 }
 
 //------------------------------------------------------------------------------
@@ -161,28 +162,32 @@ void displayContext(const char* screen) {
     oled.setCol(40+off);
     oled.print(screen);
   }
-  displayTimefromGPS(3,7);  
+
+  if(displayMode == DM_LONGLAT)
+    displayTimefromGPS(3,7);  
 }
 
 //------------------------------------------------------------------------------
 void displayLongLat() {
-    if (GPS.fix) {
-
+    if(GPS.fix) {
       oled.setCursor(0, 2);
       oled.set2X();
-
-      char f[11];
-      oled.println(dtostrf(GPS.latitudeDegrees, 10,5,f));
-      oled.println(dtostrf(GPS.longitudeDegrees, 10,5,f));
-
-      /*
-      Serial.print("Speed (knots): "); Serial.println(GPS.speed);
-      Serial.print("Angle: "); Serial.println(GPS.angle);
-      Serial.print("Altitude: "); Serial.println(GPS.altitude);
-        */
+     
+      oled.println(dtostrf(GPS.latitudeDegrees, 10,5,printBuffer));
+      oled.println(dtostrf(GPS.longitudeDegrees, 10,5,printBuffer));   
     }
 }
 
+//------------------------------------------------------------------------------
+void displayMotion() {
+  if(GPS.fix) {
+    oled.setCursor(0, 2);
+    oled.set2X();
+    oled.print("Spd:"); oled.println(dtostrf(GPS.speed,6,1,printBuffer));
+    oled.print("Ang:"); oled.println(dtostrf(GPS.angle,6,1,printBuffer));
+    oled.print("Alt:"); oled.println(dtostrf(GPS.altitude,6,1,printBuffer));
+  }
+}
 
 //------------------------------------------------------------------------------
 void updateDisplay() {
@@ -205,10 +210,11 @@ void updateDisplay() {
         displayLongLat();  
       }
     break;
-    case DM_SOMETHING:
+    case DM_MOTION:
         if (redraw || (millis() - timer > 500)) { 
           timer = millis(); // reset the timer  
-          displayContext("Motion");      
+          displayContext("Motion");
+          displayMotion();      
         }
     break; 
   }
