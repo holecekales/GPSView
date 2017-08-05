@@ -58,11 +58,18 @@ uint8_t prevDisplayMode  = -1;
 char printBuffer[15];
 
 // Navigation data
-
 float WP_LAT = 46.626636;       // (sample point)
 float WP_LON = -124.060092;
 uint8_t WP_OK = 1;
 boolean WP_Capture = false;
+
+// conversions Motion tab
+#define MPH_PER_KNOT 1.15077945       // miles per hour
+#define MPS_PER_KNOT 0.51444444       // meters per second
+#define KMPH_PER_KNOT 1.852           // kilometer per hour
+#define MILES_PER_METER 0.00062137112 
+enum {U_KN=0, U_MPS, U_KMPH, U_LAST};
+uint8_t spdConverstion = U_MPS;
 
 //------------------------------------------------------------------------------
 void setup() {
@@ -152,7 +159,7 @@ void displayKeyValueInt(const char* name, int value, uint8_t row = -1, uint8_t c
 }
 
 //------------------------------------------------------------------------------
-void displayContext(const char* screen) {
+void displayContext(const char* screenName) {
   oled.set1X();
   displayKeyValueInt("Sat:", GPS.satellites, 0, 0);
   if(WP_OK>0) {
@@ -162,16 +169,16 @@ void displayContext(const char* screen) {
     oled.print("Fix:NO");
   }
   
-  if(screen) {
+  if(screenName) {
     // pixel (column) 40 is a good begining
     // i can accomomdate at most 8 cahracters
     // calculate offset from position 40 toward the center of the screen
     // based on the length of the string
     // each char is 6 wide (right now), but i need to split it between 
     // begining and end so i will multiple by 6/2 == 3
-    uint8_t off = (8-strlen(screen)) * 3; 
+    uint8_t off = (8-strlen(screenName)) * 3; 
     oled.setCol(40+off);
-    oled.print(screen);
+    oled.print(screenName);
   }
 
   if(displayMode != DM_MOTION && displayMode != DM_NAVI)
@@ -189,13 +196,29 @@ void displayLongLat(float lat, float lon) {
 }
 
 //------------------------------------------------------------------------------
+void printBigLine(uint8_t row, uint8_t off, const char* name, const char* value, const char* unit){
+  oled.setCursor(0, row);
+  oled.set2X();
+  oled.print(name); 
+  oled.setCol(oled.col() + off);
+  oled.print(value);
+  oled.set1X();
+  oled.print(unit);
+}
+
+//------------------------------------------------------------------------------
 void displayMotion() {
   if(GPS.fix) {
-    oled.setCursor(0, 2);
-    oled.set2X();
-    oled.print("Spd:"); oled.println(dtostrf(GPS.speed,6,1,printBuffer));
-    oled.print("Ang:"); oled.println(dtostrf(GPS.angle,6,1,printBuffer));
-    oled.print("Alt:"); oled.println(dtostrf(GPS.altitude,6,1,printBuffer));
+    char* u = "";
+    float v = 0;
+    switch(spdConverstion) {
+      case U_KN:   v = GPS.speed;                   u = "kn  ";   break;
+      case U_MPS:  v = GPS.speed * MPS_PER_KNOT;    u = "m/s ";  break;
+      case U_KMPH: v = GPS.speed * KMPH_PER_KNOT;   u = "km/h"; break;
+    }
+    printBigLine(2, 7, "Spd", dtostrf(v,5,1,printBuffer), u);
+    printBigLine(4, 7, "Ang", dtostrf(GPS.angle,5,1,printBuffer), "o");
+    printBigLine(6, 7, "Alt", dtostrf(GPS.altitude,5,1,printBuffer), "m");
   }
 }
 
@@ -211,33 +234,16 @@ void displayNavigation() {
   const uint8_t o = 7;
 
   if(GPS.fix) {
-      oled.setCursor(0, 2);
-      oled.set2X();
-      oled.print("Dst:"); 
-      oled.setCol(oled.col() + o);
       float dist = distance_between(GPS.latitudeDegrees, GPS.longitudeDegrees, WP_LAT, WP_LON);
       char* u = "m";
       if(dist >= 1000) {
         u = "km";
         dist /= 1000.f;
       }
-      oled.print(dtostrf(dist,5,1,printBuffer));
-      oled.set1X();
-      oled.print(u);
-      oled.set2X();
-      oled.setCursor(0, 4);
-      oled.print("Crs:"); 
       float crs = course_to(GPS.latitudeDegrees, GPS.longitudeDegrees, WP_LAT, WP_LON);
-      oled.setCol(oled.col() + o);
-      oled.print(dtostrf(crs,5,1,printBuffer));
-      oled.set1X();
-      oled.print("o");
-      oled.set2X();
-      oled.setCursor(0, 6);
-      oled.print("Dir: ");
-      oled.setCol(oled.col() + o);
-      oled.println(cardinal(crs));
-      // maybe add a difference in altitude
+      printBigLine(2, 17, "Dst", dtostrf(dist,5,1,printBuffer), u);
+      printBigLine(4, 17, "Crs", dtostrf(crs,5,1,printBuffer), "o");
+      printBigLine(6, 17, "Dir", cardinal(crs), " ");
   }
 }
 
@@ -365,7 +371,11 @@ void handleButton() {
       if(displayMode==DM_LATLONG) {
         // in LAT/LONG mode a capture way point
         WP_Capture = true;
-      } else if(displayMode==DM_WAYPOINT) {
+      } 
+      else if(displayMode == DM_MOTION) {
+        spdConverstion = (spdConverstion + 1) % U_LAST;
+      }
+      else if(displayMode==DM_WAYPOINT) {
         // remove waypoint - no need, just for fun :)
         WP_OK  = 0;
         WP_LAT = 0;
