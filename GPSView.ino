@@ -41,13 +41,14 @@ Adafruit_GPS GPS(&ss);
 // off by default!
 boolean usingInterrupt = false;
 uint32_t timer = millis();
-
+#define SCREEN_UPDATE    500   // update screen interval
 // User interface input globals
-#define LONGPRESS_LEN    500  // millis that make up a long press (1s)
+
+#define LONGPRESS_LEN    500  // millis that make up a long press or repeat
 #define DEBOUNCE 10
-enum { EV_NONE=0, EV_SHORTPRESS, EV_LONGPRESS, EV_LONGHOLD};
+enum { EV_NONE=0, EV_SHORTPRESS, EV_LONGPRESS, EV_LONGHOLD, EV_LONGREP};
 boolean button_was_pressed = false; // previous state
-boolean button_longhold   = true;
+uint32_t button_longhold   = 0;
 uint32_t button_pressed_timer = 0; // press running duration
 
 enum { DM_LATLONG=0, DM_MOTION, DM_WAYPOINT, DM_NAVI, DM_MAX};
@@ -255,7 +256,7 @@ void updateDisplay() {
     prevDisplayMode = displayMode;
   }
 
-  if(cls || ((millis() - timer) > 500)) {
+  if(cls || ((millis() - timer) > SCREEN_UPDATE)) {
     timer = millis(); // reset the timer
 
     if(!GPS.fix) {
@@ -321,17 +322,27 @@ int raiseButtonEvent() {
   delay(DEBOUNCE); // $$$ fix this! this is BLOCKING
   int debounceVal = !digitalRead(BUTTON_PIN);         // pin low -> pressed
 
-  if(debounceVal == button_now_pressed) {
-    // The button just got released. Now we need to decide if it was short 
-    // or long press and generate the right event.
+  if(debounceVal == button_now_pressed) { // debounced
 
+    // the butotn is being held down
     if(button_now_pressed && button_was_pressed) {
-     if(button_longhold && ((millis() - button_pressed_timer) > LONGPRESS_LEN))  {
-       event = EV_LONGHOLD;
-       button_longhold = false;
+     uint32_t ms = millis();  
+     if((ms - button_pressed_timer) > LONGPRESS_LEN)  {
+       if(button_longhold == 0) {
+        // long press event - this is the first 
+        button_longhold++;
+        event = EV_LONGHOLD;
+       }
+       else if((ms - button_pressed_timer) > button_longhold*LONGPRESS_LEN) {
+        // long press repeats issues if someone continues to hold the button 
+        button_longhold++;
+        event = EV_LONGREP;
+       }
       }
     }
 
+    // The button just got released. Now we need to decide if it was short 
+    // or long press and generate the right event.
     if(!button_now_pressed && button_was_pressed) {
       if (millis() - button_pressed_timer < LONGPRESS_LEN)
         event = EV_SHORTPRESS;
@@ -340,7 +351,7 @@ int raiseButtonEvent() {
     }
 
     if(button_now_pressed && !button_was_pressed) {
-      button_longhold = true; // arm the longhold event
+      button_longhold = 0; // arm the longhold event
       button_pressed_timer = millis();
     }
     
@@ -376,7 +387,13 @@ void handleButton() {
         WP_OK  = 0;
         WP_LAT = 0;
         WP_LON = 0;
-        prevDisplayMode = -1;
+        prevDisplayMode = -1; // invalidate screen
+      }
+    break;
+    case EV_LONGREP:
+      if(displayMode == DM_MOTION) {
+        spdConverstion = (spdConverstion + 1) % U_LAST;
+        prevDisplayMode = -1; // invalidate screen
       }
     break;
   }
