@@ -57,8 +57,8 @@ boolean button_was_pressed = false; // previous state
 uint32_t button_longhold   = 0;
 uint32_t button_pressed_timer = 0; // press running duration
 
-enum { DM_LATLONG=0, DM_MOTION, DM_WAYPOINT, DM_NAVI, DM_MAX};
-char* tabName[] = {"Lat/Long", "Motion", "Waypoint", "Navigate" };
+enum { DM_LATLONG=0, DM_MOTION, DM_WAYPOINT, DM_NAVI, DM_COMPASS, DM_MAX};
+char* tabName[] = {"Lat/Long", "Motion", "Waypoint", "Navigate", "Compass" };
 
 uint8_t displayMode      = 0;
 uint8_t prevDisplayMode  = -1;
@@ -114,11 +114,12 @@ void setup() {
   pinMode(BUTTON_PIN, INPUT);
   digitalWrite(BUTTON_PIN, HIGH); // pull-up
 }
-//------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------
 void loop() {
    handleGPS();
    handleButton();  // stalls for 10ms :(
+   handleCompass();
    updateDisplay();
 }
 
@@ -251,6 +252,16 @@ void displayNavigation() {
 }
 
 //------------------------------------------------------------------------------
+void displayCompass() {
+  printBigLine(3, 15, "", "COMPASS", ""); 
+}
+
+//------------------------------------------------------------------------------
+void handleCompass() {
+
+}
+
+//------------------------------------------------------------------------------
 void updateDisplay() {
   // if millis() or timer wraps around, we'll just reset it
   if (timer > millis())  timer = millis();
@@ -298,6 +309,13 @@ void updateDisplay() {
         case DM_NAVI:
             displayContext(tabName[displayMode], WP_OK == 0);
             displayNavigation();
+        break;
+        case DM_COMPASS:
+            displayContext(tabName[displayMode], false);
+            displayCompass();
+        break;
+        default:
+          displayContext(tabName[displayMode], true);
         break;
       }
     }
