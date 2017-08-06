@@ -244,9 +244,10 @@ void displayNavigation() {
     dist /= 1000.f;
   }
   float crs = course_to(GPS.latitudeDegrees, GPS.longitudeDegrees, WP_LAT, WP_LON);
-  printBigLine(2, 17, "Dst", dtostrf(dist,5,1,printBuffer), u);
-  printBigLine(4, 17, "Crs", dtostrf(crs,5,1,printBuffer), "o");
-  printBigLine(6, 17, "Dir", cardinal(crs), " ");
+  printBigLine(2, 7, "Dst", dtostrf(dist,6,1,printBuffer), u);
+  printBigLine(4, 7, "DOT", dtostrf(crs,6,1,printBuffer), "o");
+  printBigLine(6, 7, "Div", dtostrf(crs-GPS.angle,6,1,printBuffer), "o");
+  // printBigLine(6, 17, "Dir", cardinal(crs), " ");
 }
 
 //------------------------------------------------------------------------------
