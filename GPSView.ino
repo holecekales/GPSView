@@ -27,6 +27,12 @@
 // NewSoftSerial  ss(GPS_RX, GPS_TX);
 
 #include "SoftwareSerial.h"
+#include "TimeLib.h"
+
+// Offset hours from gps time (UTC)
+//#define TIME_ZONE   1*SECS_PER_HOUR  // Central European Time
+#define TIME_ZONE  -7*SECS_PER_HOUR  // Pacific Delight Time  (USA)
+//#define TIME_ZONE  -8*SECS_PER_HOUR  // Pacific Standart Time (USA)
 
 SSD1306AsciiSoftSpi oled;
 
@@ -59,7 +65,7 @@ uint8_t prevDisplayMode  = -1;
 boolean prevGPSFIX = false;
 
 // formating print buffer
-char printBuffer[15];
+char printBuffer[25];
 
 // Navigation data
 float WP_LAT = 46.626636;       // (sample point)
@@ -146,10 +152,10 @@ void useInterrupt(boolean v) {
 }
 
 //------------------------------------------------------------------------------
-void displayTimefromGPS(uint8_t col, uint8_t row) {
-  sprintf(printBuffer,"%02d:%02d %02d\/%02d\/%02d", GPS.hour,GPS.minute,GPS.month,GPS.day,GPS.year);// build integer string using C integer formatters  
-  oled.setCursor(col, row);
-  oled.print("Time: "); oled.print(printBuffer);
+void displayTime(uint8_t row) {
+  sprintf(printBuffer,"%02d:%02d.%02d   %02d\/%02d\/%02d", hour(),minute(),second(), month(),day(),year());// build integer string using C integer formatters  
+  oled.setCursor(0, row);
+  oled.print(printBuffer);
 }
 
 //------------------------------------------------------------------------------
@@ -163,7 +169,7 @@ void displayKeyValueInt(const char* name, int value, uint8_t row = -1, uint8_t c
 }
 
 //------------------------------------------------------------------------------
-void displayContext(const char* screenName, boolean displayTime) {
+void displayContext(const char* screenName, boolean showTime) {
   oled.set1X();
   displayKeyValueInt("Sat:", GPS.satellites, 0, 0);
   if(WP_OK>0) {
@@ -185,8 +191,8 @@ void displayContext(const char* screenName, boolean displayTime) {
     oled.print(screenName);
   }
 
-  if(displayTime)
-    displayTimefromGPS(3,7);  
+  if(showTime)
+    displayTime(7);  
 }
 
 
@@ -250,7 +256,7 @@ void updateDisplay() {
 
   // redraw if page changed  or if we just aquiring fix to having fix
   boolean cls = (prevDisplayMode != displayMode) || (prevGPSFIX != GPS.fix); // clear screen
-  prevGPSFIX = GPS.fix;
+ 
   if(cls) {
     oled.clear();
     prevDisplayMode = displayMode;
@@ -260,13 +266,20 @@ void updateDisplay() {
     timer = millis(); // reset the timer
 
     if(!GPS.fix) {
-      displayContext(tabName[displayMode], true);
+      displayContext(tabName[displayMode], false);
       // if we don't have a fix, we will just display that we're looking for 
       // satellites. Time should be always good on the GPS (as long as the battery is fine)
       printBigLine(2, 10, "", "ACQUIRING", "");
       printBigLine(4, 4, "", "SATELLITES",  "");
     } 
     else {
+
+      if(!prevGPSFIX) {
+        // set the time - since we now have a fix
+        setTime(GPS.hour, GPS.minute, GPS.seconds, GPS.day, GPS.month, GPS.year);        
+        adjustTime(TIME_ZONE);      
+      }
+
       switch(displayMode) {
         case DM_LATLONG:
           displayContext(tabName[displayMode], true);
@@ -288,6 +301,8 @@ void updateDisplay() {
       }
     }
   }
+  
+  prevGPSFIX = GPS.fix;
 }
 
 //------------------------------------------------------------------------------
