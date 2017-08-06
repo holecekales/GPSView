@@ -282,7 +282,7 @@ void updateDisplay() {
             displayLongLat(WP_LAT, WP_LON);
         break;
         case DM_NAVI:
-            displayContext(tabName[displayMode], false);
+            displayContext(tabName[displayMode], WP_OK == 0);
             displayNavigation();
         break;
       }
