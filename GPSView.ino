@@ -16,15 +16,11 @@
 #define BUTTON_PIN 4  // Button
 
 #include <SPI.h>
+#include <Wire.h>
 
 #include "SSD1306Ascii.h"
 #include "SSD1306AsciiSoftSpi.h"
 #include "Adafruit_GPS.h"
-
-// #include "TinyGPS.h"
-// #include "NewSoftSerial.h"
-// TinyGPS gps;
-// NewSoftSerial  ss(GPS_RX, GPS_TX);
 
 #include "SoftwareSerial.h"
 #include "TimeLib.h"
@@ -82,10 +78,43 @@ enum {U_KN=0, U_MPS, U_KMPH, U_LAST};
 uint8_t spdConverstion = U_MPS;
 
 //------------------------------------------------------------------------------
+class MedianOf3 {
+  int16_t newest, recent, oldest; 
+public:
+  MedianOf3(int16_t initVal = 0) : newest(initVal), recent(initVal), oldest(initVal) { }
+
+  void push(int16_t val) {
+    oldest = recent;
+    recent = newest;
+    newest = val;
+  }
+  
+  int16_t get() const {
+    int16_t the_max = max( max( oldest, recent ), newest );
+    int16_t the_min = min( min( oldest, recent ), newest );
+    // unnecessarily clever code
+    int16_t the_median = the_max ^ the_min ^ oldest ^ recent ^ newest;
+    return( the_median );
+  }
+};
+//------------------------------------------------------------------------------
+// Compass definitions
+#define HMC6352Address 0x42
+#define HMC6352SlaveAddress (HMC6352Address >> 1)
+byte compassHeading[2];
+enum {COMPASS_MEASSURE = 0, COMPASS_CALIBRATE_START, COMPASS_CALIBRATING, COMPASS_CALIBRATE_END, COMPASS_LAST_STATE};
+uint8_t compassMode = COMPASS_MEASSURE; 
+MedianOf3 mgDir;
+// exists for two reasons: 90deg = because of mounting on the board 
+// and declination because of position on earth 
+#define MAG_CORRECTION 90 
+
+//------------------------------------------------------------------------------
 void setup() {
  
   Serial.begin(115200);
   GPS.begin(9600);
+  Wire.begin();
   // uncomment this line to turn on RMC (recommended minimum) and GGA (fix data) including altitude
   GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
   // uncomment this line to turn on only the "minimum recommended" data
@@ -118,8 +147,9 @@ void setup() {
 //------------------------------------------------------------------------------
 void loop() {
    handleGPS();
+   handleCompassReq();
    handleButton();  // stalls for 10ms :(
-   handleCompass();
+   handleCompassRead();  
    updateDisplay();
 }
 
@@ -151,10 +181,14 @@ void useInterrupt(boolean v) {
     usingInterrupt = false;
   }
 }
+//------------------------------------------------------------------------------
+inline void invalScreen() {
+  prevDisplayMode = -1;
+}
 
 //------------------------------------------------------------------------------
 void displayTime(uint8_t row) {
-  sprintf(printBuffer,"%02d:%02d.%02d   %02d\/%02d\/%02d", hour(),minute(),second(), month(),day(),year());// build integer string using C integer formatters  
+  sprintf(printBuffer,"%02d:%02d.%02d   %02d\/%02d\/%02d", hour(),minute(),second(), month(),day(),year());// build integer string using C integer formatters 
   oled.setCursor(0, row);
   oled.print(printBuffer);
 }
@@ -253,12 +287,64 @@ void displayNavigation() {
 
 //------------------------------------------------------------------------------
 void displayCompass() {
-  printBigLine(3, 15, "", "COMPASS", ""); 
+  if(compassMode == COMPASS_MEASSURE) {
+    // int headingValue = compassHeading[0]*256 + compassHeading[1]; // Put the MSB and LSB together
+
+    // becaause of mounting on breadboard, i need to add 90 degrees.
+    uint16_t headingValue = compassHeading[0]*256 + compassHeading[1]; // Put the MSB and LSB together
+    mgDir.push(headingValue);
+
+    uint16_t hv = int(mgDir.get() / 10) + MAG_CORRECTION;
+    if(hv > 360) hv -= 360;   // correct for overflow
+    sprintf(printBuffer,"%03d", hv);
+    // sprintf(printBuffer,"%03d.%d", hv,int(headingValue % 10));
+    printBigLine(2, 18, "Hdg", printBuffer, "o");
+    float crs = course_to(GPS.latitudeDegrees, GPS.longitudeDegrees, WP_LAT, WP_LON);
+    printBigLine(4, 7, "Ang", dtostrf(/*crs-*/GPS.angle,6,1,printBuffer), "o");
+    printBigLine(6, 7, "DOT", dtostrf(crs,6,1,printBuffer), "o");
+    
+  }
+  else {
+    printBigLine(4, 8, "", "CALIBRATE", "");
+  }
 }
 
 //------------------------------------------------------------------------------
-void handleCompass() {
+void handleCompassReq() {
+  char* c = NULL;
+  
+  switch(compassMode) {
+    case COMPASS_MEASSURE:        c = "A"; break; // The "Get Data" command
+    // send start calibration command and move to the CALIBRATING state
+    case COMPASS_CALIBRATE_START: c = "C"; compassMode = COMPASS_CALIBRATING; break; 
+    // send calibration EXIT and go back to meassuring  
+    case COMPASS_CALIBRATE_END:   c = "E"; compassMode = COMPASS_MEASSURE;  invalScreen();  break; 
+  }
+  
+  if(c != NULL) {
+    Wire.beginTransmission(HMC6352SlaveAddress);
+    Wire.write(c); // send command
+    Wire.endTransmission(); 
+  } 
+}
 
+// The HMC6352 needs at least a 70us (microsecond) delay after the REQ command
+// Using 10ms is docunebted safe and we already have 10ms delay due to the button
+// debounce. So we will just split the req and read and put it around the button
+// handler. At some point we should remove all of this to make the loop run as
+// fast as possible
+// Read the 2 heading bytes, MSB first
+// The resulting 16bit word is the compass heading in 10th's of a degree
+// For example: a heading of 1345 would be 134.5 degrees
+void handleCompassRead() {
+  if(compassMode == COMPASS_MEASSURE) {
+    Wire.requestFrom(HMC6352SlaveAddress, 2);// Request the 2 byte heading (MSB comes first)
+    int i = 0;
+    while(Wire.available() && i < 2) {
+      compassHeading[i] = Wire.read();
+      i++;
+    } 
+  }
 }
 
 //------------------------------------------------------------------------------
@@ -320,14 +406,12 @@ void updateDisplay() {
       }
     }
   }
-  
   prevGPSFIX = GPS.fix;
 }
 
 //------------------------------------------------------------------------------
 void handleGPS() {
-
- // in case you are not using the interrupt above, you'll
+  // in case you are not using the interrupt above, you'll
   // need to 'hand query' the GPS, not suggested :(
   if (!usingInterrupt) {
     // read data from the GPS in the 'main loop'
@@ -421,13 +505,28 @@ void handleButton() {
         WP_OK  = 0;
         WP_LAT = 0;
         WP_LON = 0;
-        prevDisplayMode = -1; // invalidate screen
+        invalScreen();
+      } else if(displayMode==DM_COMPASS) {
+        // the transitions to the other modes happen in 
+        // updateCompass() and handleCompass() 
+        switch(compassMode) {
+          case COMPASS_MEASSURE:
+            compassMode = COMPASS_CALIBRATE_START;
+            invalScreen(); 
+          break;
+          case COMPASS_CALIBRATING:
+            compassMode = COMPASS_CALIBRATE_END;
+          break;
+          default:
+            compassMode = COMPASS_MEASSURE; 
+          break;
+        }
       }
     break;
     case EV_LONGREP:
       if(displayMode == DM_MOTION) {
         spdConverstion = (spdConverstion + 1) % U_LAST;
-        prevDisplayMode = -1; // invalidate screen
+        invalScreen();
       }
     break;
   }
@@ -441,10 +540,8 @@ void handleButton() {
   }
 }
 
-
 //------------------------------------------------------------------------------
-float distance_between (float lat1, float long1, float lat2, float long2) 
-{
+float distance_between (float lat1, float long1, float lat2, float long2) {
   // returns distance in meters between two positions, both specified 
   // as signed decimal-degrees latitude and longitude. Uses great-circle 
   // distance computation for hypothetical sphere of radius 6372795 meters.
@@ -470,8 +567,7 @@ float distance_between (float lat1, float long1, float lat2, float long2)
 
 
 //------------------------------------------------------------------------------
-float course_to (float lat1, float long1, float lat2, float long2) 
-{
+float course_to (float lat1, float long1, float lat2, float long2) {
   // returns course in degrees (North=0, West=270) from position 1 to position 2,
   // both specified as signed decimal-degrees latitude and longitude.
   // Because Earth is no exact sphere, calculated course may be off by a tiny fraction.
@@ -483,18 +579,19 @@ float course_to (float lat1, float long1, float lat2, float long2)
   float a2 = sin(lat1) * cos(lat2) * cos(dlon);
   a2 = cos(lat1) * sin(lat2) - a2;
   a2 = atan2(a1, a2);
-  if (a2 < 0.0)
-  {
+  if (a2 < 0.0) {
     a2 += TWO_PI;
   }
   return degrees(a2);
 }
 
 //------------------------------------------------------------------------------
-const char* cardinal (float course)
-{
+const char* cardinal (float course) {
   static const char* directions[] = {"N  ", "NNE", "NE ", "ENE", "E  ", "ESE", "SE ", "SSE", "S  ", "SSW", "SW ", "WSW", "W  ", "WNW", "NW ", "NNW"};
 
   int direction = (int)((course + 11.25f) / 22.5f);
   return directions[direction % 16];
 }
+
+
+
