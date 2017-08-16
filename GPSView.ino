@@ -295,7 +295,7 @@ void displayCompass() {
     mgDir.push(headingValue);
 
     uint16_t hv = int(mgDir.get() / 10) + MAG_CORRECTION;
-    if(hv > 360) hv -= 360;   // correct for overflow
+    if(hv >= 360) hv -= 360;   // correct for overflow
     sprintf(printBuffer,"%03d", hv);
     // sprintf(printBuffer,"%03d.%d", hv,int(headingValue % 10));
     printBigLine(2, 18, "Hdg", printBuffer, "o");
@@ -489,6 +489,8 @@ void handleButton() {
     break;
     case EV_SHORTPRESS:
       displayMode = (displayMode + 1) % DM_MAX;
+      if(compassMode == COMPASS_CALIBRATING)
+        compassMode = COMPASS_CALIBRATE_END;
     break;
     case EV_LONGPRESS:
     break;
